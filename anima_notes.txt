@@ -1,0 +1,80 @@
+
+CODE | DEF
+-----|---------------
+PAL  | Palette
+PNT  | Paint
+STR  | Stroke
+ROT  | Rotate
+TWK  | Twinkle
+LAY  | Layer
+PAN  | Pan
+
+
+CODE: PAL
+DEF: Palette
+DESC: Sets the palette if required
+SYNTAX: PAL([hex],...)
+EXAMPLE: PAL(abcdef,FF0000,FfFfFf)
+NOTES: Should be done at start of scene
+
+CODE: PNT
+DEF: Paint
+DESC: Paints a segment with a gradually-changing color
+SYNTAX: PNT([from_color],[to_color],[from_idx/<end>],[to_idx/<end>])
+EXAMPLES:
+  PNT(ff0000,00ff00,start,end)  : Paint Red to Green, start (0) to end (var)
+  PNT(0,2,0,end)                : Paint palette color #0 to #2, start to end
+  PNT(abcdef,4,30,20)           : Paint color abcdef to pal #4, pos 30 down to pos 20
+NOTES: Colors can be hex or palette #, positions can be index or "end"
+
+CODE: STR
+DEF: Stroke
+DESC: Draws a single color along a segment
+SYNTAX: STR([color],[from_idx/<end>],[to_idx/<end>])
+EXAMPLES:
+  STR(1,0,end)      : Draw color #1 from pos 0 to end
+  STR(abcdef,5,10)  : Draw color abcdef from pos 5 to pos 10
+NOTES: Color can be hex or palette #, positions can be index or "end"
+
+CODE: ROT
+DEF: Rotate
+DESC: Rotate a layer in some direction at some speed
+SYNTAX: ROT([direction:{0:UP,1:DOWN}],[delay])
+EXAMPLES:
+  ROT(0,200)     : Rotate up with a delay of 200ms/step
+  ROT(DOWN,100)  : Rotate down with a delay of 100ms/step
+NOTES: direction is int or str code, delay in ms
+
+CODE: TWK
+DEF: Twinkle
+DESC: Twinkle a layer at some speed
+SYNTAX: TWK([pattern:{0:UP,1:DOWN,2:RAND}],[delay])
+EXAMPLES:
+  TWK(0,10)      : Twinkle with upward propagation at 10ms/step
+  TWK(DOWN,100)  : Twinkle with downward propagation at 100ms/step
+  TWK(RAND,1000) : Twinkle with random propagation at 1000ms/step
+NOTES:
+  Pattern is int or str code, delay in ms. Propagation refers to the
+  apparent direction of shadow drifting due to initial Perlin Noise
+  setup pattern
+
+CODE: LAY
+DEF: Layer
+DESC: Defines a layer
+SYNTAX: LAY([draw commands...],[animate commands...])
+EXAMPLES:
+  LAY(PNT(FF32AE,3338FF,0,END),TWK(UP,200))  : Paint hot pink to cool blue, then twinkle at 200ms/step
+
+
+FULL CODE EXAMPLES:
+  - PAL(FF32AE,3338FF,000000),LAY(PNT(0,1,0,END),TWK(RAND,100)),LAY(STR(2,0,3),ROT(DOWN,10))
+    Set palette to:
+      #0 hot pink (FF32AE)
+      #1 cool blue (3338FF)
+      #2 black (000000)
+    Create a layer:
+      Paint hot pink to cool blue across strip length
+      Twinkle with random pattern at 100ms/step
+    Create a layer above:
+      Stroke black from 0 to 3
+      Rotate down at 10ms/step
