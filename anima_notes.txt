@@ -66,6 +66,16 @@ EXAMPLES:
   LAY(PNT(FF32AE,3338FF,0,END),TWK(UP,200))  : Paint hot pink to cool blue, then twinkle at 200ms/step
 
 
+CODE: PAN
+DEF: Pan
+DESC: Pans the viewport
+SYNTAX: PAN([direction:{0:UP,1:DOWN}],[delay])
+EXAMPLES:
+  PAN(0,200)     : Pan up with a delay of 200ms/step
+  PAN(DOWN,100)  : Pan down with a delay of 100ms/step
+NOTES: direction is int or str code, delay in ms
+
+
 FULL CODE EXAMPLES:
   - PAL(FF32AE,3338FF,000000),LAY(PNT(0,1,0,END),TWK(RAND,100)),LAY(STR(2,0,3),ROT(DOWN,10))
     Set palette to:
