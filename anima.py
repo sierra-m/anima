@@ -13,8 +13,13 @@ import random
 
 class RGBAColor(RGBColor):
     def __init__(self, val, alpha=1.0):
-        super().__init__(val)
-        self.alpha = alpha
+        if isinstance(val, str) and len(val) >= 8:
+            val = val.replace('#', '')
+            super().__init__(val[0:5])
+            self.alpha = int(val[6:7], 16)
+        else:
+            super().__init__(val[0:5])
+            self.alpha = alpha
 
     @classmethod
     def null(cls):
@@ -39,6 +44,9 @@ class RGBAColor(RGBColor):
 
         return color_out
 
+    def get_rgb_vals(self):
+        return list(map(lambda x: int(x * 3), self.vals))
+
 
 class Layer:
     def __init__(self, buffer: List[RGBAColor] = None, size: int = None):
@@ -62,6 +70,9 @@ class Layer:
         if not isinstance(value, RGBAColor):
             value = RGBAColor(value)
         self.buffer[key] = value
+
+    def __iter__(self):
+        return iter(self.buffer)
 
     def rotate_up(self):
         self.buffer = self.buffer[-1:] + self.buffer[:-1]
@@ -156,6 +167,7 @@ class Animation(ABC):
     def __init__(self, *args, **kwargs):
         self.layer = kwargs.get('layer')
         self.delay_ms = kwargs.get('delay_ms', 0)
+        self.timer = Timer(self.delay_ms / 1000)
 
         if not self.layer:
             raise ValueError('Animation requires `layer` argument')
@@ -167,6 +179,12 @@ class Animation(ABC):
     @abstractmethod
     def step(self):
         pass
+
+    def run_step(self):
+        if self.timer:
+            self.step()
+            return True
+        return False
 
 
 class Rotate(Animation):
@@ -224,28 +242,147 @@ class Twinkle(Animation):
             self.noise_seeds[i] += self.velocity
 
 
+class Viewport:
+    def __init__(self, buffer_size, delay_ms: int = 100):
+        self.view_from = 0
+        self.view_to = buffer_size - 1
+        self.size = buffer_size
+        self.velocity = 0
+        self.timer = Timer(delay_ms / 1000)
+
+    def step(self):
+        self.view_from = (self.view_from + self.velocity) % self.size
+        self.view_to = (self.view_to + self.velocity) % self.size
+
+    def set_direction(self, pan_up: bool):
+        self.velocity = 1 if pan_up else -1
+
+    def set_delay(self, delay_ms: int):
+        self.timer.timeout = delay_ms / 1000
+
+    def run_step(self):
+        if self.timer:
+            self.run_step()
+
+
 class BracketException(SyntaxError):
     pass
 
 
+class ArgumentException(BaseException):
+    pass
+
+
 class Anima:
+    operation_sizes = {
+        'STR': 3,
+        'PNT': 4,
+        'ROT': 2,
+        'TWK': 3
+    }
+
+    twinkle_types = {
+        'up': TwinklePattern.PROP_UP,
+        'down': TwinklePattern.PROP_DOWN,
+        'rand': TwinklePattern.RANDOM
+    }
+
     def __init__(self, pin, size, brightness=0.7):
         self.pixels = neopixel.NeoPixel(pin, size, bpp=3, auto_write=False, brightness=brightness)
 
+        self.size = size
         self.palette = []
         self.base_layer = Layer(size=size)  # Layer to composite upon
+        self.layers = []
+        self.animations = []
+
+        self.viewport = Viewport(size)
 
     def execute(self, command: str):
         macro_tokens = self.tokenize(command)
 
+        # Level 1 macros - palette, layer
         for token in macro_tokens:
             name, middle = self.split_command(token)
             if name == 'PAL':
-                pass
+                colors = self.tokenize(middle)
+                self.palette = map(lambda x: RGBAColor(x), colors)
             elif name == 'LAY':
-                pass
+                new_layer = Layer(self.size)
+                self.layers.append(new_layer)
+                draw_cmds = self.tokenize(middle)
+
+                for cmd in draw_cmds:
+                    op_name, args_list = self.split_command(cmd)
+                    args = self.tokenize(args_list)
+
+                    if self.operation_sizes[op_name] != len(args):
+                        raise ArgumentException(f'Incorrect argument length for {op_name}')
+
+                    self.add_operation(new_layer, op_name, args)
+            elif name == 'PAN':
+                args = self.tokenize(middle)
+                self.viewport.set_direction(pan_up=args[0].lower() == 'up')
+                self.viewport.set_delay(delay_ms=int(args[1]))
+                return
             else:
                 raise ValueError('May not define draw/animation commands at top level')
+
+    def add_operation(self, new_layer: Layer, op_name, args):
+        operation = None
+        if op_name == 'STR':
+            operation = Stroke(layer=new_layer,
+                               color=self.render_color(args[0]),
+                               from_idx=int(args[1]),
+                               to_idx=int(args[2]))
+        elif op_name == 'PNT':
+            operation = Paint(layer=new_layer,
+                              from_color=self.render_color(args[0]),
+                              to_color=self.render_color(args[1]),
+                              from_idx=int(args[2]),
+                              to_idx=int(args[3]))
+        elif op_name == 'ROT':
+            operation = Rotate(layer=new_layer,
+                               rotate_up=1 if args[0].lower() == 'up' else 0,
+                               delay_ms=int(args[1]))
+        elif op_name == 'TWK':
+            operation = Twinkle(layer=new_layer,
+                                pattern=self.twinkle_types[args[0]] if args[
+                                                                           0] in self.twinkle_types else TwinklePattern.PROP_UP,
+                                velocity=float(args[1]),
+                                delay_ms=int(args[2]))
+        else:
+            raise TypeError(f'No such operation {op_name}')
+
+        if isinstance(operation, Drawing):
+            operation.draw()
+        else:
+            operation.pre()
+            self.animations.append(operation)
+
+    def update(self):
+        # iterate from base to top
+        results = map(lambda anim: anim.run_step(), self.animations)
+
+        # if any motion occurs, composite layers and assign
+        if any(results):
+            build_layer = self.base_layer
+
+            for layer in self.layers:
+                build_layer = layer.composite_over(build_layer)
+
+            for i, color in enumerate(build_layer):
+                self.pixels[i] = color.get_rgb_vals()
+
+            self.pixels.show()
+
+    def render_color(self, color: str):
+        if len(color) >= 6:
+            return RGBAColor(color)
+        val = int(color)
+        if val >= len(self.palette):
+            raise ValueError(f'color #{color} out of palette bounds')
+        return self.palette[val]
 
     @staticmethod
     def tokenize(command: str):
